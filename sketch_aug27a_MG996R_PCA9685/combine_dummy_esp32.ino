@@ -4,9 +4,9 @@
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 
-const char* ssid = "Purworejo Pride Bawah";
-const char* password = "polisi27";
-const char* websocket_server = "192.168.0.106";
+const char* ssid = "cukimay";
+const char* password = "tobrutgajahat";
+const char* websocket_server = "192.168.18.27";
 const int websocket_port = 8000;
 
 const String uid = "66ba2ab6efd2eeeeb7df85e8";
@@ -53,7 +53,7 @@ void setup() {
   }
   Serial.println("Connected to WiFi");
 
-  url = "/ws/control-esp/" + uid;
+  url = "/ws/control/" + uid + "?source=esp32";
 
   webSocket.begin(websocket_server, websocket_port, url);
   webSocket.onEvent(webSocketEvent);
@@ -132,26 +132,43 @@ void handleIncomingMessage(uint8_t *payload, size_t length) {
     return;
   }
 
-  if (doc.containsKey("angle")) {
-    int angle = doc["angle"];
-    Serial.print("Received angle: ");
-    Serial.println(angle);
-
-  // Cek apakah ada kunci boolean untuk kontrol
-  if (doc.containsKey("control")) {
-    bool control = doc["control"];
-    Serial.print("Received control: ");
-    Serial.println(control ? "true" : "false");
-
-    if (control) {
-      // Jika true, gerakkan servo ke sudut 90 derajat
-      moveServoToAngle(90);
-    } else {
-      // Jika false, kembalikan servo ke posisi 0 derajat
-      moveServoToAngle(0);
-    }
+  // Update switch states
+  if (doc.containsKey("switch1")) {
+    switch1 = doc["switch1"];
   }
+  if (doc.containsKey("switch2")) {
+    switch2 = doc["switch2"];
+  }
+  if (doc.containsKey("switch3")) {
+    switch3 = doc["switch3"];
+  }
+  if (doc.containsKey("switch4")) {
+    switch4 = doc["switch4"];
+  }
+  if (doc.containsKey("switch5")) {
+    switch5 = doc["switch5"];
+  }
+  if (doc.containsKey("switch6")) {
+    switch6 = doc["switch6"];
+  }
+
+  // Handle servo movement based on switch status
+  if (switch1) {
+    // Move servo to 90 degrees if switch1 is true
+    moveServoToAngle(90);
+  } else {
+    // Move servo to 0 degrees if switch1 is false
+    moveServoToAngle(0);
+  }
+  
+  // Additional handling for other switches if needed
+
+  // Log received data for debugging
+  Serial.print("Received data: ");
+  serializeJson(doc, Serial);
+  Serial.println();
 }
+
 
 void moveServoToAngle(int angle) {
   if (angle >= 0 && angle <= 180) {
