@@ -354,6 +354,7 @@ void setup(void) {
     Serial.println("[Setup] I2C initialized.");
 
     // Initialize ADS1115
+    /*
     if (!ads.begin(0x48)) {
         Serial.println("[Setup] Failed to initialize ADS1115. Please check wiring and address.");
         while (true) {
@@ -363,7 +364,8 @@ void setup(void) {
         Serial.println("[Setup] ADS1115 initialized successfully.");
     }
     ads.setGain(GAIN_ONE);
-
+    */
+    
     // Initialize LCD Display
     Serial.println("[Setup] Initializing LCD display...");
     lcdDisplay.init();
@@ -457,7 +459,7 @@ void setup(void) {
     Serial.println("[Setup] Semaphores created successfully.");
 
     Serial.printf("[Debug] Free Heap Memory: %d bytes\n", ESP.getFreeHeap());
-
+    /*
     // Create tasks after semaphores are initialized
     Serial.println("[Setup] Creating tasks...");
     if (xTaskCreatePinnedToCore(taskReadSensors, "ReadSensorsTask", 8192, NULL, 3, NULL, 1) != pdPASS) {
@@ -489,7 +491,7 @@ void setup(void) {
     } else {
         Serial.println("[Setup] DisplayLCDTask created successfully.");
     }
-
+    */
     Serial.println("[Setup] All setup steps complete.");
 }
 
