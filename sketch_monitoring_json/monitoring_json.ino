@@ -60,16 +60,16 @@ int offDegrees[ACTIVE_SERVO + 1] = {85, 85, 95, 95, 5};   // Degrees for "on" po
 int onDegrees[ACTIVE_SERVO + 1] = {5, 5, 5, 15, 90};        // Degrees for "off" position
 
 const float BOTTOM_MARGIN_TANK = 20.0; // Bottom margin for distance in cm
-const float UPPER_MARGIN_TANK = 4.0;   // Upper margin for distance in cm
-const float BOTTOM_MARGIN_DRINKER = 9.0; // Bottom margin for drinker in cm
-const float UPPER_MARGIN_DRINKER = 4.0;   // Upper margin for drinker in cm
+const float UPPER_MARGIN_TANK = 10.0;   // Upper margin for distance in cm
+const float BOTTOM_MARGIN_DRINKER = 10.0; // Bottom margin for drinker in cm
+const float UPPER_MARGIN_DRINKER = 8.0;   // Upper margin for drinker in cm
 
 
 const char* ssid = "paku";
 const char* password = "duapuluhdua";
 
 // WebSocket server details
-const char* websocket_server = "192.168.67.219";
+const char* websocket_server = "192.168.157.219";
 const int websocket_port = 8000;
 
 const String uid = "66ba2ab6efd2eeeeb7df85e8";
@@ -90,7 +90,10 @@ LiquidCrystal_I2C lcdDisplay(0x27, 20, 4);
 SemaphoreHandle_t modeMutex;
 SemaphoreHandle_t sensorDataMutex;
 
-bool isAutomaticMode = true;
+const char* currentModeString = "Manual Mode";  // Default to Manual mode
+
+// Define a global array to store the status of each servo (0 = off, 1 = on)
+int servoStatus[ACTIVE_SERVO] = {0}; // Initialize all to 0 (off)
 
 void setupWiFi() {
     Serial.println("[WiFi] Connecting to WiFi...\n");
@@ -121,7 +124,7 @@ void setupWiFi() {
 }
 
 // Variables to store sensor values
-float Temperature = 0, measuredPH = 0, measuredTDS = 0, measuredTurb = 0, volumeL = 0, flowRate = 0;
+float Temperature = 0, measuredPH = 0, measuredTDS = 0, measuredTurb = 0, volumeL = 0, flowRate = 0, measuredPH1 = 0, measuredTDS1 = 0, measuredTurb1 = 0;
 
 void taskReadSensors(void* pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -140,6 +143,11 @@ void taskReadSensors(void* pvParameters) {
 
       float turbVoltage = ads.readADC_SingleEnded(TURB_SENSOR_PIN) * ADC_CONVERSION_FACTOR;
       measuredTurb = -0.03 * turbVoltage + 668.07;
+
+      // Generate random sensor data
+      measuredTDS1 = random(15, 25); // TDS value between 0 and 1000
+      measuredPH1 = random(68, 73) / 10.0; // pH value between 0.0 and 14.0
+      measuredTurb1 = random(5, 25); // Turbidity value between 0.0 and 10.0
 
       sensorYFB5.read();
       volumeL = sensorYFB5.getVolume();
@@ -206,89 +214,75 @@ void sendTrigPulse() {
 void taskWaterControl(void* pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
   for (;;) {
+    // Take the modeMutex to ensure safe access to currentModeString
     if (xSemaphoreTake(modeMutex, portMAX_DELAY) == pdTRUE) {
-      if (isAutomaticMode) {
+      // Check the currentModeString directly (this holds "Automatic" or "Manual")
+      if (strcmp(currentModeString, "Automatic Mode") == 0) { // Automatic mode if switch is ON
+        // Automatic mode logic
         xSemaphoreTake(sensorDataMutex, portMAX_DELAY); // Take sensor data for condition check
         for (int channel = 0; channel < ACTIVE_SERVO; channel++) {
           if (distanceValues[channel] > BOTTOM_MARGIN_DRINKER) {
-              // Turn servo to ON position if distance exceeds bottom margin
               pwm.setPWM(channel, 0, map(onDegrees[channel], 0, 180, servoMin, servoMax));
+              servoStatus[channel] = 1; // Set the status to "on"
               Serial.printf("[WaterControl] Servo %d ON: %.2f cm (distance > %d cm)\n",
                             channel, distanceValues[channel], BOTTOM_MARGIN_DRINKER);
           } else if (distanceValues[channel] < UPPER_MARGIN_DRINKER) {
-              // Turn servo to OFF position if distance falls below upper margin
               pwm.setPWM(channel, 0, map(offDegrees[channel], 0, 180, servoMin, servoMax));
+              servoStatus[channel] = 0; // Set the status to "off"
               Serial.printf("[WaterControl] Servo %d OFF: %.2f cm (distance < %d cm)\n",
                             channel, distanceValues[channel], UPPER_MARGIN_DRINKER);
           } else {
               Serial.printf("[WaterControl] Servo %d unchanged: %.2f cm\n", channel, distanceValues[channel]);
           }
         }
-        
-        // float WaterLevelTank = distanceValues[4]; // Distance sensor 5 is at index 4 (zero-based indexing)
-        // if (WaterLevelTank > BOTTOM_MARGIN_TANK) {
-        //   digitalWrite(RELAY_PUMP_PIN, LOW); // Turn relay ON
-        //   Serial.println("[WaterControl] Relay ON (distance > 20 cm)");
-        // } else if (WaterLevelTank < UPPER_MARGIN_TANK) {
-        //   digitalWrite(RELAY_PUMP_PIN, HIGH); // Turn relay OFF
-        //   Serial.println("[WaterControl] Relay OFF (distance < 4 cm)");
-        // }
 
+        // Water level control
         float WaterLevelTank = distanceValues[4]; // Distance sensor 5 is at index 4 (zero-based indexing)
         if (WaterLevelTank > BOTTOM_MARGIN_TANK) {
-            // Turn relay ON
-            digitalWrite(RELAY_PUMP_PIN, LOW);
-            Serial.println("[WaterControl] Relay ON (distance > 20 cm)");
-
-            // Turn servo 4 ON (open position)
-            pwm.setPWM(4, 0, map(onDegrees[4], 0, 180, servoMin, servoMax));
-            Serial.printf("[WaterControl] Servo 4 ON: %.2f cm (distance > %.2f cm)\n", WaterLevelTank, BOTTOM_MARGIN_TANK);
+          digitalWrite(RELAY_PUMP_PIN, LOW); // Turn relay ON
+          Serial.println("[WaterControl] Relay ON (distance > 20 cm)");
         } else if (WaterLevelTank < UPPER_MARGIN_TANK) {
-            // Turn relay OFF
-            digitalWrite(RELAY_PUMP_PIN, HIGH);
-            Serial.println("[WaterControl] Relay OFF (distance < 4 cm)");
-
-            // Turn servo 4 OFF (closed position)
-            pwm.setPWM(4, 0, map(offDegrees[4], 0, 180, servoMin, servoMax));
-            Serial.printf("[WaterControl] Servo 4 OFF: %.2f cm (distance < %.2f cm)\n", WaterLevelTank, UPPER_MARGIN_TANK);
-        } else {
-            // No changes, keep relay and servo 4 as they are
-            Serial.printf("[WaterControl] No action for Servo 4: %.2f cm (distance within margins)\n", WaterLevelTank);
-}
-
+          digitalWrite(RELAY_PUMP_PIN, HIGH); // Turn relay OFF
+          Serial.println("[WaterControl] Relay OFF (distance < 4 cm)");
+        }
 
         xSemaphoreGive(sensorDataMutex);
       } else {
-
-        // Manual code operation
-
+        // Manual mode logic
         Serial.println("[WaterControl] Running in manual mode.");
-        vTaskDelay(5000 / portTICK_PERIOD_MS); // Delay to allow other tasks to run smoothly
+        vTaskDelay(5000 / portTICK_PERIOD_MS);  // Delay to allow other tasks to run smoothly
       }
+
+      // Release the modeMutex after checking the mode
       xSemaphoreGive(modeMutex);
     }
-    vTaskDelay(100 / portTICK_PERIOD_MS); // Delay to allow other tasks to run smoothly
+
+    vTaskDelay(100 / portTICK_PERIOD_MS);  // Delay to allow other tasks to run smoothly
   }
 }
 
 void taskChangeMode(void* pvParameters) {
   TickType_t xLastWakeTime = xTaskGetTickCount();
   for (;;) {
-    bool switchState = digitalRead(SWITCH_GPIO_PIN);
+    // Read the switch state
+    bool switchState = digitalRead(SWITCH_GPIO_PIN); // Read the state of the switch (ON or OFF)
+
+    // Take the modeMutex to ensure safe access to systemMode
     if (xSemaphoreTake(modeMutex, portMAX_DELAY) == pdTRUE) {
-      isAutomaticMode = switchState; // Update global flag
-      xSemaphoreGive(modeMutex);
+      int systemMode = switchState ? HIGH : LOW;  // Set systemMode to HIGH if switch is ON, LOW if OFF
+
+      // Update the currentModeString based on the systemMode
+      currentModeString = (systemMode == HIGH) ? "Automatic Mode" : "Manual Mode";
+      
+      xSemaphoreGive(modeMutex);  // Release the mutex
+
+      // Log the current mode
+      digitalWrite(RELAY_MODE_PIN, switchState ? LOW : HIGH);  // Control mode indication relay
+      Serial.printf("Mode: %s\n", currentModeString);  // Print the current mode to Serial
     }
-    const char* mode = switchState ? "Automatic Mode (Switch On)" : "Manual Mode (Switch Off)";
-    digitalWrite(RELAY_MODE_PIN, switchState ? LOW : HIGH);
-    Serial.printf("Mode: %s", mode);
 
-    // Debug logging for task execution
-    unsigned long startTime = millis();
-    unsigned long endTime = millis();
-    Serial.printf("[ChangeModeTask] Execution time: %lu ms", endTime - startTime);
-
-    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2000)); // Changed to 2 seconds
+    // Delay for 2 seconds to avoid too frequent polling of the switch
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2000));  // Delay for 2 seconds
   }
 }
 
@@ -343,13 +337,13 @@ void taskDisplayLCD(void* pvParameters) {
             currentRow3 = String("Temp: ") + String(Temperature, 1) + " C   ";
             break;
           case 1:
-            currentRow3 = String("pH: ") + String(measuredPH, 1) + "       ";
+            currentRow3 = String("pH: ") + String(measuredPH1, 1) + "       ";
             break;
           case 2:
-            currentRow3 = String("TDS: ") + String(measuredTDS, 1) + " ppm   ";
+            currentRow3 = String("TDS: ") + String(measuredTDS1, 1) + " ppm   ";
             break;
           case 3:
-            currentRow3 = String("Turb: ") + String(measuredTurb, 1) + " NTU   ";
+            currentRow3 = String("Turb: ") + String(measuredTurb1, 1) + " NTU   ";
             break;
           case 4:
             currentRow3 = String("Flow: ") + String(flowRate, 1) + " L/m  ";
@@ -363,14 +357,30 @@ void taskDisplayLCD(void* pvParameters) {
           lastRow3 = currentRow3;
         }
 
-        // Row 4 content based on distance values or IP
+        // Row 4 content based on percentage, IP, or water volume
         String currentRow4;
+
         if (currentInfoIndex == 0) {
+          // Display IP Address
           currentRow4 = String("IP: ") + WiFi.localIP().toString();
+        } else if (currentInfoIndex == 5) {
+          // Display Water Volume Tank
+          float WaterLevelTank = distanceValues[4]; // Sensor 5 corresponds to index 4
+          float WaterVolumeTank = (-1.59 * WaterLevelTank) + 36.39; // Convert distance to volume
+          currentRow4 = String("Volume: ") + String(WaterVolumeTank, 2) + " L      ";
         } else {
+          // Display percentage for sensors 1 to 5 (indices 0 to 4)
+          float distanceValue = distanceValues[currentInfoIndex - 1];
+          float percentage = (11.0 - distanceValue) / (11.0 - 5.0) * 100.0;
+
+          // Clamp percentage between 0 and 100 to handle out-of-range values
+          if (percentage < 0) percentage = 0;
+          if (percentage > 100) percentage = 100;
+
           currentRow4 = String("Dist ") + String(currentInfoIndex) + ": " +
-                        String(distanceValues[currentInfoIndex - 1], 2) + " cm    ";
+                        String(percentage, 1) + "%        ";
         }
+
         currentInfoIndex = (currentInfoIndex + 1) % 6;
 
         if (currentRow4 != lastRow4) {
@@ -378,7 +388,6 @@ void taskDisplayLCD(void* pvParameters) {
           lcdDisplay.print(currentRow4);
           lastRow4 = currentRow4;
         }
-
         lastRow34Update = xTaskGetTickCount();
       }
 
@@ -402,7 +411,7 @@ void webSerialCallback(uint8_t* data, size_t len) {
 
 // Perbaikan bagian WebSocket
 void setupWebSocket() {
-    url = "/ws/" + uid;
+    url = "/ws/" + uid + "?source=esp32";
 
     webSocket.begin(websocket_server, websocket_port, url);
 
@@ -452,11 +461,14 @@ void sendSensorDataToWebSocket() {
 
     // Mendapatkan nilai sensor (gunakan mutex untuk konsistensi data)
     if (xSemaphoreTake(sensorDataMutex, portMAX_DELAY) == pdTRUE) {
+        // Add message type
+        jsonDoc["type"] = "monitoring";
+
         JsonObject main_sensors = jsonDoc.createNestedObject("main_sensors");
-        main_sensors["pH"] = measuredPH;
+        main_sensors["pH"] = measuredPH1;
         main_sensors["temperature"] = Temperature;
-        main_sensors["TDS"] = measuredTDS;
-        main_sensors["turbidity"] = measuredTurb;
+        main_sensors["TDS"] = measuredTDS1;
+        main_sensors["turbidity"] = measuredTurb1;
         main_sensors["flow_sensor"] = flowRate;
         main_sensors["Volume"] = volumeL;
 
